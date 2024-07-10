@@ -45,7 +45,6 @@ const privateKey =
     return pk
   })()
 
-// const signer = privateKeyToAccount('0x47cfffe655129fa5bce61a8421eb6ea97ec6d5609b5fbea45ad68bacede19d8b')
 
 const getPimlicoEndpoint = (chainId: string) => {
   const chain = getChain(chainId);
@@ -68,12 +67,26 @@ export const getBundlerClient = async (chainId: string) => {
 
 }
 
-export const getSmartAccountClient = async (chainId: string, address: Hex, nonceKey: bigint,  signer: any, signUserOperation?: any) => {
+interface SmartAccountClientParams {
+  chainId: string;
+  signer?: any;
+  nonceKey?: bigint;
+  address?: Hex;
+  signUserOperation?: any;
+  getDummySignature? : any;
+}
+
+
+export const getSmartAccountClient = async ( { chainId, nonceKey, signer, address, signUserOperation, getDummySignature  } : SmartAccountClientParams ) => {
+
+  console.log(signUserOperation)
 
   const chain = getChain(chainId);
+  const dummySigner = privateKeyToAccount('0x47cfffe655129fa5bce61a8421eb6ea97ec6d5609b5fbea45ad68bacede19d8b')
+
   const account = await signerToSafeSmartAccount(publicClient(parseInt(chainId)), {
     entryPoint: ENTRYPOINT_ADDRESS_V07,
-    signer,
+    signer: signer ?? dummySigner,
     address,
     nonceKey,
     safeVersion: '1.4.1',
@@ -82,7 +95,8 @@ export const getSmartAccountClient = async (chainId: string, address: Hex, nonce
     erc7569LaunchpadAddress,
   })
 
-  account.signUserOperation = signUserOperation ?? signUserOperation
+  account.signUserOperation = signUserOperation ?? account.signUserOperation
+  account.getDummySignature = getDummySignature ?? account.getDummySignature
 
   const pimlicoBundlerClient = await getBundlerClient(chainId)
   const paymasterClient = await getPaymasterClient(chainId)

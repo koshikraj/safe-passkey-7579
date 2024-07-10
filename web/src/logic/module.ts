@@ -5,8 +5,9 @@ import { getSafeInfo, isConnectedToSafe, submitTxs } from "./safeapp";
 import { isModuleEnabled, buildEnableModule, buildUpdateFallbackHandler } from "./safe";
 import { getJsonRpcProvider, getProvider } from "./web3";
 import Safe7579 from "./Safe7579.json"
+import WebAuthnValidator from "./WebAuthnValidator.json"
 import EntryPoint from "./EntryPoint.json"
-import {  Address, Hex, PrivateKeyAccount, encodeAbiParameters, pad, toBytes } from "viem";
+import {  Address, Hex, PrivateKeyAccount, SendTransactionParameters, encodeAbiParameters, pad, toBytes } from "viem";
 import { ENTRYPOINT_ADDRESS_V07, getPackedUserOperation, UserOperation, getAccountNonce } from 'permissionless'
 import {
     getClient,
@@ -19,13 +20,18 @@ import {
     OWNABLE_VALIDATOR_ADDRESS
   } from "@rhinestone/module-sdk";
 import { NetworkUtil } from "./networks";
-import { getSmartAccountClient } from "./permissionless";
+import { SafeSmartAccountClient, getSmartAccountClient } from "./permissionless";
 import { signMessage } from "viem/accounts";
 import { buildUnsignedUserOpTransaction } from "@/utils/userOp";
+import { Hex32 } from "permissionless/_types/types/userOperation";
+import { KernelValidator } from "@zerodev/passkey-validator";
+import { ENTRYPOINT_ADDRESS_V07_TYPE } from "permissionless/types/entrypoint";
    
 
 const safe7579Module = "0x3Fdb5BC686e861480ef99A6E3FaAe03c0b9F32e2"
 const ownableModule = "0xeA1C45a77bCcD401388553033A994d7F296db3CE"
+const webAuthnModule = "0xD990393C670dCcE8b4d8F858FB98c9912dBFAa06"
+
 
 export function generateRandomString(length: number) {
     const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -54,36 +60,47 @@ export function generateKeysFromString(string: string) {
 }
 
 
+export const getWebAuthn = async (chainId: string, account: string): Promise<any> => {
+
+    const provider = await getJsonRpcProvider(chainId)
+
+    const webAuthnValidator = new Contract(
+        webAuthnModule,
+        WebAuthnValidator.abi,
+        provider
+    )
 
 
-export const sendTransaction = async (chainId: string, recipient: string, amount: bigint, walletProvider: PrivateKeyAccount, safeAccount: Hex): Promise<any> => {
+    const webAuthnData = await webAuthnValidator.webAuthnValidatorStorage(account);
+
+    return webAuthnData;
+
+}
+
+
+export const sendTransaction = async (chainId: string, recipient: string, amount: bigint, walletProvider: any, safeAccount: Hex): Promise<any> => {
 
     const call = { to: recipient as Hex, value: amount, data: '0x' as Hex }
 
+    console.log(call)
 
-    const key = BigInt(pad(ownableModule as Hex, {
+    const key = BigInt(pad(webAuthnModule as Hex, {
         dir: "right",
         size: 24,
       }) || 0
     )
 
-    const signUserOperation = async function signUserOperation(userOperation: UserOperation<"v0.7">) {
 
-    const provider = await getJsonRpcProvider(chainId)
+    console.log(await walletProvider.getNonceKey())
 
-    const entryPoint = new Contract(
-        ENTRYPOINT_ADDRESS_V07,
-        EntryPoint.abi,
-        provider
-    )
-    
-    let typedDataHash = getBytes(await entryPoint.getUserOpHash(getPackedUserOperation(userOperation)))
+    console.log(key)
 
-    return await walletProvider.signMessage({ message:  { raw: typedDataHash}}) 
-    }
+    console.log(walletProvider)
 
-    const smartAccount = await getSmartAccountClient(chainId, safeAccount, key, walletProvider, signUserOperation)
 
+    const smartAccount = await getSmartAccountClient( { chainId, nonceKey: key, address: safeAccount, signUserOperation: walletProvider.signUserOperation, getDummySignature: walletProvider.getDummySignature})
+
+    console.log(smartAccount)
 
     return await smartAccount.sendTransaction(call);
 }
@@ -110,18 +127,14 @@ const buildInitSafe7579 = async ( ): Promise<BaseTransaction> => {
 
 
 
-const buildInstallModule = async (address: Address, type: ModuleType, initData: Hex): Promise<BaseTransaction> => {
+const buildInstallModule = async (chainId: number, safeAccount: Address, address: Address, type: ModuleType, initData: Hex): Promise<BaseTransaction> => {
 
-    const provider = await getProvider()
-    const safeInfo = await getSafeInfo()
-    
-    const chainId = (await provider.getNetwork()).chainId.toString()
 
-    const client = getClient({ rpcUrl: NetworkUtil.getNetworkById(parseInt(chainId))?.url!});
+    const client = getClient({ rpcUrl: NetworkUtil.getNetworkById(chainId)?.url!});
 
     // Create the account object
     const account = getAccount({
-            address: safe7579Module,
+            address: safeAccount,
             type: "safe",
         });
 
@@ -139,7 +152,7 @@ const buildInstallModule = async (address: Address, type: ModuleType, initData: 
       });
 
 
-      return {to: safeInfo.safeAddress , value: executions[0].value.toString() , data: executions[0].callData}
+      return {to: executions[0].target, value: executions[0].value.toString() , data: executions[0].callData}
 
 }
 
@@ -175,20 +188,16 @@ const buildOwnableInstallModule = async (owners: Address[], threshold: number): 
 }
 
 
-const isInstalled = async (address: Address, type: ModuleType): Promise<boolean> => {
+export const isInstalled = async (chainId: number, safeAddress: Address, address: Address, type: ModuleType): Promise<boolean> => {
 
-    const provider = await getProvider()
-    const safeInfo = await getSafeInfo()
-    
-    // Updating the provider RPC if it's from the Safe App.
-    const chainId = (await provider.getNetwork()).chainId.toString()
 
-    const client = getClient({ rpcUrl: NetworkUtil.getNetworkById(parseInt(chainId))?.url!});
+
+    const client = getClient({ rpcUrl: NetworkUtil.getNetworkById(chainId)?.url!});
 
 
     // Create the account object
     const account = getAccount({
-            address: safeInfo.safeAddress as Hex,
+            address: safeAddress,
             type: "safe",
         });
 
@@ -222,33 +231,43 @@ export const addValidatorModule = async (ownerAddress: Hex ) => {
 
     const txs: BaseTransaction[] = []
 
-    if (!await isModuleEnabled(info.safeAddress, safe7579Module)) {
-        txs.push(await buildEnableModule(info.safeAddress, safe7579Module))
-        txs.push(await buildUpdateFallbackHandler(info.safeAddress, safe7579Module))
-        txs.push(await buildInitSafe7579())
+//     if (!await isModuleEnabled(info.safeAddress, safe7579Module)) {
+//         txs.push(await buildEnableModule(info.safeAddress, safe7579Module))
+//         txs.push(await buildUpdateFallbackHandler(info.safeAddress, safe7579Module))
+//         txs.push(await buildInitSafe7579())
  
-        // txs.push(await buildOwnableInstallModule([ownerAddress], 1))
-        txs.push(await buildInstallModule(ownableModule, 'validator', encodeAbiParameters(
-            [
-              { name: 'threshold', type: 'uint256' },
-              { name: 'owners', type: 'address[]' },
-            ],
-            [BigInt(1), [ownerAddress]],
-          ),))
+//         // txs.push(await buildOwnableInstallModule([ownerAddress], 1))
+//         txs.push(await buildInstallModule(ownableModule, 'validator', encodeAbiParameters(
+//             [
+//               { name: 'threshold', type: 'uint256' },
+//               { name: 'owners', type: 'address[]' },
+//             ],
+//             [BigInt(1), [ownerAddress]],
+//           ),))
 
-    }
-    else if(!await isInstalled(ownableModule, 'validator')) {
-        // txs.push(await buildOwnableInstallModule([ownerAddress], 1))
-        txs.push(await buildInstallModule(ownableModule, 'validator', encodeAbiParameters(
-            [
-              { name: 'threshold', type: 'uint256' },
-              { name: 'owners', type: 'address[]' },
-            ],
-            [BigInt(1), [ownerAddress]],
-          ),))
+//     }
+//     else if(!await isInstalled(ownableModule, 'validator')) {
+//         // txs.push(await buildOwnableInstallModule([ownerAddress], 1))
+//         txs.push(await buildInstallModule(ownableModule, 'validator', encodeAbiParameters(
+//             [
+//               { name: 'threshold', type: 'uint256' },
+//               { name: 'owners', type: 'address[]' },
+//             ],
+//             [BigInt(1), [ownerAddress]],
+//           ),))
 
-    }
+//     }
 
     if (txs.length > 0)  
     await submitTxs(txs)
+}
+
+
+export const addWebAuthnModule = async (safeClient: SafeSmartAccountClient, passKeyValidator: KernelValidator<ENTRYPOINT_ADDRESS_V07_TYPE>) => {
+
+
+    const buildWebAuthnModule = await buildInstallModule(safeClient.chain.id, safeClient.account.address, webAuthnModule, 'validator', await passKeyValidator.getEnableData() )
+
+    await safeClient.sendTransaction({to: buildWebAuthnModule.to as Hex, value: BigInt(buildWebAuthnModule.value), data: buildWebAuthnModule.data as Hex})
+    
 }

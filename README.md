@@ -1,15 +1,18 @@
-# Module template for 7579 + Safe
-
+# Safe + ZeroDev PassKey
 [![License](https://img.shields.io/badge/license-GPL3-blue.svg)](https://github.com/koshikraj/module-template-7579/blob/main/LICENSE)
+
+Developed using the [module-template-7579](https://github.com/koshikraj/module-template-7579)
 
 ## Description
 
-Module template to build modules for Safe accounts using ERC-7579 standard
+This project is built using the [module-template-7579](https://github.com/koshikraj/module-template-7579) to integrate Passkey validator into Safe Accounts.
 
 ## Features
 
 - Uses Rhinestone's [Safe 7579 adapter](https://github.com/rhinestonewtf/safe7579)
 - Uses Rhinestone's [module-sdk](https://github.com/rhinestonewtf/module-sdk)
+- Integrates with [ZerdoDev's WebAuthn validator](https://github.com/zerodevapp/kernel-7579-plugins/tree/master/validators/webauthn) module
+- Uses Permissionless.js 
 - Pimlico bundlers and paymasters
 
 ## Usage
@@ -17,16 +20,34 @@ Module template to build modules for Safe accounts using ERC-7579 standard
 1. Clone the repository:
 
     ```bash
-    git clone https://github.com/koshikraj/module-template-7579.git
+    git clone https://github.com/koshikraj/safe-passkey-7579.git
     ```
 
-2. Project structure:
+    Project structure:
 
-├── module-template-7579 <br/>
-│   ├── [Safe App](./web)<br/>
-│   ├── [Module](./module)<br/>
-│   └── [Dependency Packages](./packages)
+    ├── safe-passkey-7579 <br/>
+    │   ├── [Safe App](./web)<br/>
+    │   └── [Module](./module)
 
+
+2. Install dependencies
+
+    ```bash
+    npm install
+    ```
+
+3. Run module tests
+
+    ```bash
+    cd module
+    npm run test
+    ```
+
+4. Run web app
+
+    ```bash
+    cd web
+    npm run dev
 
 
 ## Contributing
@@ -35,7 +56,7 @@ Contributions are welcome! Please follow the [contribution guidelines](CONTRIBUT
 
 ## Acknowledgments
 
-This project uses the `OwnableValidator` module from the Rhinestone's [collection of core 7579 modules](https://github.com/rhinestonewtf/core-modules).
+This project uses the [ZerdoDev's WebAuthn validator](https://github.com/zerodevapp/kernel-7579-plugins/tree/master/validators/webauthn) module
 
 ## License
 

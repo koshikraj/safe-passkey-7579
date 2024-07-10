@@ -1,22 +1,29 @@
-import { Text, ActionIcon, Alert, Anchor, Avatar, Badge, Button, CopyButton, Divider, Input, Modal, Paper, rem, Tooltip, InputBase, Combobox, useCombobox, Group, Notification, Skeleton } from '@mantine/core';
+import { Text, ActionIcon, Alert, Anchor, Avatar, Badge, Button, CopyButton, Divider, Input, Modal, Paper, rem, Tooltip, InputBase, Combobox, useCombobox, Group, Notification, Skeleton, Timeline, Stack, Image, Loader } from '@mantine/core';
 import classes from './account.module.css';
 import { useEffect, useState } from 'react';
 import useLinkStore from '@/store/link/link.store';
 import { ethers, formatEther, parseEther, parseUnits, Wallet, ZeroAddress } from 'ethers';
 import { buildTransferToken, getTokenBalance, getTokenDecimals } from '@/logic/utils';
 import { useDisclosure } from '@mantine/hooks';
-import { IconCheck, IconChevronDown, IconCoin, IconConfetti, IconCopy, IconX } from '@tabler/icons';
+import { IconCheck, IconChevronDown, IconCoin, IconConfetti, IconCopy, IconShieldCheck, IconUserCheck, IconX } from '@tabler/icons';
 import { NetworkUtil } from '@/logic/networks';
 import { getIconForId, getTokenInfo, getTokenList, tokenList } from '@/logic/tokens';
 import { getJsonRpcProvider } from '@/logic/web3';
 
-import { generateKeysFromString, generateRandomString, sendTransaction } from '@/logic/module';
+import { addWebAuthnModule, generateKeysFromString, generateRandomString, isInstalled, sendTransaction } from '@/logic/module';
 import { loadAccountInfo, storeAccountInfo } from '@/utils/storage';
 
 import Key from '../../assets/icons/key.svg';
-import { waitForExecution } from '@/logic/permissionless';
+import Passkey from '../../assets/icons/passkey.svg';
+import PasskeyWhite from '../../assets/icons/passkey-white.svg';
+import PasskeyGreen from '../../assets/icons/passkey-green.svg';
+
+import SafePasskey from '../../assets/icons/safe-passkey.svg';
+
+import { SafeSmartAccountClient, getSmartAccountClient, waitForExecution } from '@/logic/permissionless';
 import { privateKeyToAccount } from 'viem/accounts';
 import { Hex, PrivateKeyAccount } from 'viem';
+import { create, login } from '@/logic/passkey';
 
 
 
@@ -26,19 +33,25 @@ export const AccountPage = () => {
   
   const { claimDetails, accountDetails, setAccountDetails, setConfirming, chainId, setChainId } = useLinkStore((state: any) => state);
   const [ balance, setBalance ] = useState<any>(0);
-  const [opened, { open, close }] = useDisclosure(false);
+  const [opened, { open, close }] = useDisclosure(!accountDetails.account);
   const [sendModal, setSendModal] = useState(false);
+  const [passkeyAuth, setPasskeyAuth] = useState(true);
+  const [onboardingStep, setOnboardingStep] = useState(0);
+  const [walletName, setWalletName] = useState('');
   const [tokenValue, setTokenValue] = useState(0);
   const [sendAddress, setSendAddress] = useState('');
   const [sendSuccess, setSendSuccess] = useState(false);
   const [ error, setError ] = useState(false);
   const [balanceLoading, setBalanceLoading] = useState(false);
   const [sendLoader, setSendLoader] = useState(false);
-  const [safeAccount, setSafeAccount] = useState<Hex>(loadAccountInfo().account);
+  // const [safeAccount, setSafeAccount] = useState<Hex>(loadAccountInfo().account);
+  const [accountClient, setAccountClient] = useState<SafeSmartAccountClient>();
   const [ authenticating, setAuthenticating ] = useState(false);
+  const [ creating, setCreating ] = useState(false);
   const [dimensions, setDimensions] = useState({ width: window.innerWidth, height: window.innerHeight });
   const [value, setValue] = useState<string>("0x0000000000000000000000000000000000000000");
-  const [walletProvider, setWalletProvider] = useState<PrivateKeyAccount>();
+  const [walletProvider, setWalletProvider] = useState<any>();
+  const [passKeyInstalled, setPassKeyInstalled] = useState(false);
 
   
 
@@ -159,7 +172,7 @@ export const AccountPage = () => {
             parseAmount = 0n;
             toAddress = value;
         }
-    const result = await sendTransaction(chainId.toString(), toAddress, parseAmount, walletProvider!, safeAccount)
+    const result = await sendTransaction(chainId.toString(), toAddress, parseAmount, walletProvider!, accountDetails.account)
     if (!result)
     setSendSuccess(false);
     else {
@@ -189,6 +202,22 @@ export const AccountPage = () => {
   }
 
 
+  function getStep() {
+
+    if( passKeyInstalled ) {
+      return 2;
+    }
+    else if( walletProvider ) {
+      return 1;
+    }
+    else if ( accountDetails.account) {
+      return 0;
+    }
+    else 
+      return -1;
+  }
+
+
 
   useEffect(() => {
     (async () => {
@@ -198,22 +227,37 @@ export const AccountPage = () => {
       if(!address) {
 
         ({ address, privateKey }  = generateKeys());
-   
       }
-      storeAccountInfo(safeAccount, address, privateKey);
-      setAccountDetails({ account: safeAccount, address, privateKey })
-      setWalletProvider(privateKeyToAccount(privateKey))
 
-      if(!accountDetails.account) {
-        open();
+      const accountSigner = privateKeyToAccount(privateKey)
+      const accountClient = await getSmartAccountClient({ chainId, signer: accountSigner})
+      account = accountClient.account.address
+
+      setAccountClient(accountClient)
+      storeAccountInfo(account, address, privateKey);
+      setAccountDetails({ account: account, address, privateKey })
+
+
+      if (walletProvider) {
+        try {
+        if(! await isInstalled(chainId, account, walletProvider.address, 'validator')) {
+          await addWebAuthnModule(accountClient!, walletProvider)
+  
+        }
+        }
+        catch(e) {
+
+        }
+        setPassKeyInstalled(true)
       }
+  
 
       
       setBalanceLoading(true);
       const provider = await getJsonRpcProvider(chainId.toString());
 
       if(value == ZeroAddress) {
-        setBalance(formatEther(await provider.getBalance(safeAccount )))
+        setBalance(formatEther(await provider.getBalance(account )))
         } else {
         setBalance(await getTokenBalance(value, claimDetails?.account?.address , provider))
         }
@@ -221,7 +265,7 @@ export const AccountPage = () => {
       window.addEventListener('resize', () => setDimensions({ width: window.innerWidth, height: window.innerHeight }));
       
     })();
-  }, [ safeAccount, accountDetails.address, chainId, sendSuccess, value, sendLoader]);
+  }, [ walletProvider, chainId, sendSuccess, value, sendLoader]);
 
 
   
@@ -232,20 +276,21 @@ export const AccountPage = () => {
   }
   return (
     <>
-    <Modal opened={opened} onClose={close} title="Authenticate your Account" centered>
+      <Modal opened={passkeyAuth} onClose={()=> setPasskeyAuth(false)} title="Authenticate your Account" centered>
 
 <div className={classes.formContainer}>
       <div>
-        <h1 className={classes.heading}>Authenticate your Safe with external owner</h1>
+        <h1 className={classes.heading}>Use Safe Account via PassKey
+</h1>
       </div>
       <p className={classes.subHeading}>
-        Enter your Safe Address
+        Create a new Safe using a new PassKey
       </p>
       <div className={classes.accountInputContainer}>
       
        <div
           style={{
-            // display: 'flex',
+            display: 'flex',
             justifyContent: 'space-between',
             marginTop: '20px',
             marginBottom: '20px',
@@ -253,95 +298,226 @@ export const AccountPage = () => {
           }}
         >
 
-        <Input.Wrapper >
-          <Input
-            type="text"
-            size="lg" 
-            value={safeAccount}
-            onChange={(event: any) => 
-              {
-                setSafeAccount(event.currentTarget.value);
-              }
-            }
-            placeholder="Safe Account Address"
-            className={classes.input}
-          />
-        </Input.Wrapper>
+    
+      <Button
+        type="button"
+        variant="outline"
+        size="lg" radius="md" 
+        fullWidth
+        color="green"
+        loading={ creating }
+        leftSection={<Avatar src={PasskeyGreen} size='sm' />}
+        loaderProps={{ color: 'green', type: 'dots', size: 'md' }}
+        style={{
+          marginLeft: "20px"}}
+        onClick={ async() => { 
 
+        try {  
+        setCreating(true); 
+        const passkeyValidator =  await create(`Safe PassKey ${new Date().toLocaleDateString('en-GB')}`, chainId)
+        setWalletProvider(passkeyValidator)
+        storeAccountInfo("", "", "");
+        setAccountDetails({});
+        setPasskeyAuth(false);
+        setCreating(false); 
+      }
+      catch(e) {
+        setCreating(false);
+      }
+      }}
+        
+      
+      >
+      Create new PassKey
+      </Button>
       </div>
 
-      <p className={classes.footerHeading}>
-        Import the Safe Account to control it with an external owner
+      <Divider my="xs" label="OR" labelPosition="center" />
+
+      <p className={classes.subHeading}>
+       Connect existing Safe using an existing PassKey
       </p>
 
-      <Divider my="xs" label="CONNECT WALLET" labelPosition="center" />
-
-
+        
       <div
+          style={{
+            display: 'flex',
+            marginTop: '20px',
+            marginBottom: '20px',
+            alignItems: 'center',
+            justifyContent: 'center',
+
+          }}
+        >
+          
+      <Button
+        size="lg" radius="md" 
+        type="button"
+        fullWidth
+        color="green"
+        className={classes.btn}
+        loaderProps={{ color: 'white', type: 'dots', size: 'md' }}
+        leftSection={<Avatar src={PasskeyWhite} size='sm' />}
+        onClick={ async() => { 
+        setAuthenticating(true); 
+          
+        try {  
+        const passkeyValidator =  await login(chainId)
+
+        setWalletProvider(passkeyValidator)
+        setPasskeyAuth(false);
+        setAuthenticating(false); 
+
+        } 
+        catch(e) {
+          console.log(e)
+          setAuthenticating(false);
+        }
+        }}
+        loading={ authenticating}
+      >
+
+      Use existing PassKey
+      </Button>
+      </div>   
+      </div>
+    </div>
+  
+</Modal>
+
+  <Modal  overlayProps={{
+          backgroundOpacity: 0.55,
+          blur: 7}} size={600} opened={opened && !passkeyAuth} onClose={()=>{}} title="Authenticate your Safe Account" centered>
+
+  <div className={classes.formContainer} >
+      <div>
+        <h1 className={classes.heading}>Use Safe Account via PassKey</h1>
+      </div>
+
+
+      <div className={classes.accountInputContainer}>
+      {<Timeline
+      active={getStep()} 
+      bulletSize={30} 
+      lineWidth={1}
+      color='green'
+    >
+
+    <Timeline.Item
+        bullet={<IconShieldCheck style={{ width: rem(18), height: rem(18) }} />}
+        title="Your Safe Account"
+      >
+
+          { accountDetails.account && 
+
+
+            <Group
+            style={{
+              display: 'flex',
+              marginTop: '20px',
+              gap: '20px',
+              marginBottom: '20px',
+              alignItems: 'center',
+              // justifyContent: 'center',
+
+            }}
+          >
+           <Group wrap="nowrap">
+           <Avatar
+             src="https://pbs.twimg.com/profile_images/1643941027898613760/gyhYEOCE_400x400.jpg"
+             size={50}
+             radius="md"
+           />
+   
+             <Group wrap="nowrap" gap={10} mt={3}>
+             <CopyButton value={""} timeout={1000}>
+                 {({ copied, copy }) => (
+                   <Tooltip label={copied ? 'Copied' : 'Copy'} withArrow position="right">
+                     <ActionIcon color={copied ? 'teal' : 'gray'} variant="subtle" onClick={copy}>
+                       {copied ? (
+                         <IconCheck style={{ width: rem(16) }} />
+                       ) : (
+                         <IconCopy style={{ width: rem(16) }} />
+                       )}
+                     </ActionIcon>
+                   </Tooltip>
+                 )}
+               </CopyButton>
+               <Text fz="lg" c="dimmed">
+               {shortenAddress( accountDetails.account ? accountDetails.account : ZeroAddress)}
+               </Text>
+             </Group>
+         </Group>
+         </Group>
+          }
+    </Timeline.Item>
+      <Timeline.Item
+        bullet={<IconUserCheck style={{ width: rem(18), height: rem(18) }} />}
+        title="Enable PassKey auth on Safe"
+      
+      >
+
+      {getStep() > 1 && <Stack
           style={{
             display: 'flex',
             marginTop: '20px',
             gap: '20px',
             marginBottom: '20px',
-            alignItems: 'center',
-            justifyContent: 'center',
-
+            // alignItems: 'center',
           }}
         >
 
-      <Group wrap="nowrap">
-        <Avatar
-          src={Key}
-          size={50}
+      <Text fz="sm" fw={500} className={classes.name}  c="dimmed">
+        Successfully connected passkey to Safe
+        </Text>
+        
+        <Image
+          src={ SafePasskey }
           radius="md"
-        />
+          w={150}
+        />      
 
-        <div>
+      </Stack> 
+      }
 
-          <Group wrap="nowrap" gap={10} mt={3}>
-          <CopyButton value={accountDetails?.address} timeout={1000}>
-              {({ copied, copy }) => (
-                <Tooltip label={copied ? 'Copied' : 'Copy'} withArrow position="right">
-                  <ActionIcon color={copied ? 'teal' : 'gray'} variant="subtle" onClick={copy}>
-                    {copied ? (
-                      <IconCheck style={{ width: rem(16) }} />
-                    ) : (
-                      <IconCopy style={{ width: rem(16) }} />
-                    )}
-                  </ActionIcon>
-                </Tooltip>
-              )}
-            </CopyButton>
-            <Text fz="xs" c="dimmed">
-            {accountDetails.address ? shortenAddress(accountDetails?.address) : '...'}
-            </Text>
-          </Group>
+      { getStep() == 1 && <Stack
+          style={{
+            display: 'flex',
+            marginTop: '20px',
+            gap: '20px',
+            marginBottom: '20px',
+            // alignItems: 'center',
+          }}
+        >
 
-        </div>
-      </Group>
+      <Text fz="sm" fw={500} className={classes.name}  c="dimmed">
+        Loading passkey on your Safe ...
+        </Text>
+        
+        <Loader color="green" type="bars" />    
 
-        <Button
-        size="sm" 
-        radius="md" 
-        variant="outline"
-        // fullWidth
-        color="red"
-        // className={classes.btn}
-        loaderProps={{ color: 'white', type: 'dots', size: 'md' }}
-        onClick={ async() => { 
-          
-          storeAccountInfo(accountDetails.account, '', '')
-          setAccountDetails({account: accountDetails.account, address: '',  privateKey: ''})
+      </Stack> 
+      }
 
 
-        }}
-        loading={ authenticating}
-      >
-      Generate
+    { getStep() < 1 && <Stack>
+      <Text fz="sm" fw={500} className={classes.name}  c="dimmed">
+        Authenticate with any of the below methods
+        </Text>
+        <Group>
+      <Button size='lg' variant="default" radius='md' onClick={ ()=> setPasskeyAuth(true)}>
+      <Avatar src={Passkey} size='md'  />
+      Add PassKey
       </Button>
+      </Group>
+      </Stack> 
+    }
 
-      </div>
 
+      </Timeline.Item>
+
+    </Timeline>
+    }
 
       <div
           style={{
@@ -354,32 +530,28 @@ export const AccountPage = () => {
           }}
         >
 
-
-
       <Button
         size="lg" 
-        radius="md"         fullWidth
-        color="green"
-        className={classes.btn}
+        radius="md"         
+        fullWidth
+        className={getStep() < 2 ?  "" : classes.btn}
+        disabled={getStep() < 2}
         loaderProps={{ color: 'white', type: 'dots', size: 'md' }}
         onClick={ async() => { 
           
         try {  
+
         close();
         } 
         catch(e) {
-
-          setAuthenticating(false);
-          storeAccountInfo(safeAccount, accountDetails.address, accountDetails.privateKey);
-
-
         }
    
         }}
-        loading={ authenticating}
       >
       Continue
       </Button>
+
+
       </div>   
       </div>
     </div>
@@ -510,15 +682,15 @@ export const AccountPage = () => {
         <div className={classes.avatarContainer}>
           <img
             className={classes.avatar}
-            src="https://pbs.twimg.com/profile_images/1643941027898613760/gyhYEOCE_400x400.jpg"
+            src= {SafePasskey}
             alt="avatar"
-            height={100}
-            width={100}
+            height={200}
+            // width={200}
           />
            <div className={classes.balanceContainer}>
-         <Anchor href={`${NetworkUtil.getNetworkById(chainId)?.blockExplorer}/address/${safeAccount}`} target="_blank" underline="hover">  <p> { shortenAddress( safeAccount ? safeAccount : ZeroAddress)}</p>
+         <Anchor href={`${NetworkUtil.getNetworkById(chainId)?.blockExplorer}/address/${accountDetails.account}`} target="_blank" underline="hover">  <p> { shortenAddress( accountDetails.account ? accountDetails.account : ZeroAddress)}</p>
           </Anchor>
-          <CopyButton value={safeAccount} timeout={1000}>
+          <CopyButton value={accountDetails.account} timeout={1000}>
               {({ copied, copy }) => (
                 <Tooltip label={copied ? 'Copied' : 'Copy'} withArrow position="right">
                   <ActionIcon color={copied ? 'teal' : 'gray'} variant="subtle" onClick={copy}>

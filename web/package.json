@@ -26,6 +26,7 @@
     "@tabler/icons": "^1.79.0",
     "@tabler/icons-react": "^2.44.0",
     "@types/node": "^20.10.4",
+    "@zerodev/passkey-validator": "^5.2.7",
     "axios": "^1.4.0",
     "buffer": "^6.0.3",
     "dayjs": "^1.11.10",

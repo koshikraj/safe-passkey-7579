@@ -80,7 +80,7 @@ export const Head = (props) => {
                 onClick={() => {
                   navigate(RoutePath.home);
                 }}
-                style={{ cursor: 'pointer', width: '220px' }}
+                style={{ cursor: 'pointer', width: '260px' }}
                 src={dark ? LogoDark : LogoLight}
                 alt="Logo"
               />
@@ -88,17 +88,6 @@ export const Head = (props) => {
 
             <Group className={classes.mode}>
 
-             {isMobile ?  <IconKey
-                    size={30}
-                    stroke={1.5}
-                    onClick={() => navigate(RoutePath.account)}
-                    style={{ cursor: 'pointer' }}
-                  /> :
-
-                  <Button leftSection={<IconKey size={20} />}  onClick={() => navigate(RoutePath.account)} variant="default">
-                     Account 
-                  </Button> 
-                  }
               <div className={classes.container}>
                 
                 {dark ? (

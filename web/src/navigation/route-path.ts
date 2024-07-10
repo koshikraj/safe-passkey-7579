@@ -4,7 +4,6 @@
  */
 export enum RoutePath {
   home = '/',
-  claim = '/claim',
-  account = '/account',
+  account = '/',
   notFound = '*',
 }

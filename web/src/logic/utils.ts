@@ -1,5 +1,5 @@
 import { PublicClient, createPublicClient, http } from "viem";
-import { PimlicoPaymasterClient, createPimlicoPaymasterClient } from "permissionless/clients/pimlico";
+import SafePassKeyNFT from "./SafePassKeyNFT.json"
 import { NetworkUtil } from "./networks";
 import { ethers, formatUnits } from "ethers";
 
@@ -92,6 +92,18 @@ export async function buildTransferToken(tokenAddress: string, to: string, value
 const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
 
 const data = await tokenContract.transfer.populateTransaction(to, value);
+
+return data.data;
+
+}
+
+export async function buildMintNFT(tokenAddress: string, provider: any) {
+  // Ethereum provider (you can use Infura or any other provider)
+
+
+const nftContract = new ethers.Contract(tokenAddress, SafePassKeyNFT.abi, provider);
+
+const data = await nftContract.mint.populateTransaction();
 
 return data.data;
 

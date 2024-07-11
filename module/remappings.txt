@@ -15,4 +15,5 @@ solarray/=node_modules/solarray/src/
 erc4337-validation/=node_modules/erc4337-validation/src/
 
 openzeppelin-contracts/=node_modules/@openzeppelin/
+kernel/=node_modules/kernel/src/
 solady/=lib/kernel/lib/solady/src/

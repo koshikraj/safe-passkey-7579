@@ -14,6 +14,13 @@ const deploy: DeployFunction = async ({ deployments, getNamedAccounts, network }
     log: true,
     deterministicDeployment: true,
   })
+
+  await deploy('SafePassKeyNFT', {
+    from: deployer,
+    args: ['SafePassKeyNFT', 'SPASS'],
+    log: true,
+    deterministicDeployment: true,
+  })
   
 }
 

@@ -1,29 +1,32 @@
-import { Text, ActionIcon, Alert, Anchor, Avatar, Badge, Button, CopyButton, Divider, Input, Modal, Paper, rem, Tooltip, InputBase, Combobox, useCombobox, Group, Notification, Skeleton, Timeline, Stack, Image, Loader } from '@mantine/core';
+import { Text, ActionIcon, Alert, Anchor, Avatar, Badge, Button, CopyButton, Divider, Input, Modal, Paper, rem, Tooltip, InputBase, Combobox, useCombobox, Group, Notification, Skeleton, Timeline, Stack, Image, Loader, Pill, Indicator } from '@mantine/core';
 import classes from './account.module.css';
 import { useEffect, useState } from 'react';
 import useLinkStore from '@/store/link/link.store';
 import { ethers, formatEther, parseEther, parseUnits, Wallet, ZeroAddress } from 'ethers';
-import { buildTransferToken, getTokenBalance, getTokenDecimals } from '@/logic/utils';
+import { buildMintNFT, buildTransferToken, getTokenBalance, getTokenDecimals } from '@/logic/utils';
 import { useDisclosure } from '@mantine/hooks';
-import { IconCheck, IconChevronDown, IconCoin, IconConfetti, IconCopy, IconShieldCheck, IconUserCheck, IconX } from '@tabler/icons';
+import { IconCheck, IconChevronDown, IconCoin, IconConfetti, IconCopy, IconPhoto, IconShieldCheck, IconUserCheck, IconX } from '@tabler/icons';
 import { NetworkUtil } from '@/logic/networks';
 import { getIconForId, getTokenInfo, getTokenList, tokenList } from '@/logic/tokens';
 import { getJsonRpcProvider } from '@/logic/web3';
 
-import { addWebAuthnModule, generateKeysFromString, generateRandomString, isInstalled, sendTransaction } from '@/logic/module';
+import { addWebAuthnModule, generateKeysFromString, generateRandomString, getSafePassNFTCount, isInstalled, safePassKeyNFT, sendTransaction } from '@/logic/module';
 import { loadAccountInfo, storeAccountInfo } from '@/utils/storage';
 
-import Key from '../../assets/icons/key.svg';
 import Passkey from '../../assets/icons/passkey.svg';
 import PasskeyWhite from '../../assets/icons/passkey-white.svg';
 import PasskeyGreen from '../../assets/icons/passkey-green.svg';
+import SafePassKeyNFT from '../../assets/icons/SafePassKeyNFT.svg';
+import NotFound from '../../assets/icons/not-found.jpg';
+
 
 import SafePasskey from '../../assets/icons/safe-passkey.svg';
 
 import { SafeSmartAccountClient, getSmartAccountClient, waitForExecution } from '@/logic/permissionless';
 import { privateKeyToAccount } from 'viem/accounts';
-import { Hex, PrivateKeyAccount } from 'viem';
 import { create, login } from '@/logic/passkey';
+import { IconTransfer } from '@tabler/icons-react';
+import { Hex } from 'viem';
 
 
 
@@ -36,13 +39,13 @@ export const AccountPage = () => {
   const [opened, { open, close }] = useDisclosure(!accountDetails.account);
   const [sendModal, setSendModal] = useState(false);
   const [passkeyAuth, setPasskeyAuth] = useState(true);
-  const [onboardingStep, setOnboardingStep] = useState(0);
-  const [walletName, setWalletName] = useState('');
+  const [mintModal, setMintModal] = useState(false);
   const [tokenValue, setTokenValue] = useState(0);
   const [sendAddress, setSendAddress] = useState('');
   const [sendSuccess, setSendSuccess] = useState(false);
   const [ error, setError ] = useState(false);
   const [balanceLoading, setBalanceLoading] = useState(false);
+  const [nftBalance, setNftBalance] = useState(0);
   const [sendLoader, setSendLoader] = useState(false);
   // const [safeAccount, setSafeAccount] = useState<Hex>(loadAccountInfo().account);
   const [accountClient, setAccountClient] = useState<SafeSmartAccountClient>();
@@ -172,7 +175,7 @@ export const AccountPage = () => {
             parseAmount = 0n;
             toAddress = value;
         }
-    const result = await sendTransaction(chainId.toString(), toAddress, parseAmount, walletProvider!, accountDetails.account)
+    const result = await sendTransaction(chainId.toString(), toAddress, parseAmount, '0x', walletProvider!, accountDetails.account)
     if (!result)
     setSendSuccess(false);
     else {
@@ -180,7 +183,6 @@ export const AccountPage = () => {
     setConfirming(true);
     // await waitForExecution(chainId.toString(), result);
     setConfirming(false);
-
     }
     
     
@@ -190,16 +192,34 @@ export const AccountPage = () => {
     setSendLoader(false);  
   }  
   setSendLoader(false);
-
   }
 
-  function generateKeys() {
+  async function MintNFT() {
 
-    const randomSeed = generateRandomString(18)
+    setError(false);
+    setSendSuccess(false);
+    setSendLoader(true);
+    try {
 
-    return generateKeysFromString(randomSeed);
-
+      const provider = await getJsonRpcProvider(chainId.toString())
+      const data = await buildMintNFT(safePassKeyNFT, provider)
+      const result = await sendTransaction(chainId.toString(), safePassKeyNFT, 0n, data as Hex, walletProvider!, accountDetails.account)
+      if (!result)
+      setSendSuccess(false);
+      else {
+      setSendSuccess(true);
+      setConfirming(true);
+      setConfirming(false);
+    } 
+    
+  } catch(e) {
+    console.log('error', e)
+    setError(true);
+    setSendLoader(false);  
+  }  
+  setSendLoader(false);
   }
+
 
 
   function getStep() {
@@ -222,30 +242,31 @@ export const AccountPage = () => {
   useEffect(() => {
     (async () => {
 
-      let { account,  address, privateKey} =  loadAccountInfo()
-
-      if(!address) {
-
-        ({ address, privateKey }  = generateKeys());
-      }
-
-      const accountSigner = privateKeyToAccount(privateKey)
-      const accountClient = await getSmartAccountClient({ chainId, signer: accountSigner})
-      account = accountClient.account.address
-
-      setAccountClient(accountClient)
-      storeAccountInfo(account, address, privateKey);
-      setAccountDetails({ account: account, address, privateKey })
 
 
       if (walletProvider) {
         try {
-        if(! await isInstalled(chainId, account, walletProvider.address, 'validator')) {
-          await addWebAuthnModule(accountClient!, walletProvider)
-  
-        }
+          const accountClient = await getSmartAccountClient({ chainId, validators: [{ address: walletProvider.address, context: await walletProvider.getEnableData()}]})
+          const account = accountClient.account.address
+    
+          setNftBalance(await getSafePassNFTCount(chainId, account))
+    
+          setAccountClient(accountClient)
+          // storeAccountInfo(account, address, privateKey);
+          setAccountDetails({ account: account, address: '', privateKey: '' })
+
+          setBalanceLoading(true);
+          const provider = await getJsonRpcProvider(chainId.toString());
+    
+          if(value == ZeroAddress) {
+            setBalance(formatEther(await provider.getBalance(account )))
+            } else {
+            setBalance(await getTokenBalance(value, claimDetails?.account?.address , provider))
+            }
+          setBalanceLoading(false);
         }
         catch(e) {
+          console.log(e)
 
         }
         setPassKeyInstalled(true)
@@ -253,15 +274,7 @@ export const AccountPage = () => {
   
 
       
-      setBalanceLoading(true);
-      const provider = await getJsonRpcProvider(chainId.toString());
 
-      if(value == ZeroAddress) {
-        setBalance(formatEther(await provider.getBalance(account )))
-        } else {
-        setBalance(await getTokenBalance(value, claimDetails?.account?.address , provider))
-        }
-      setBalanceLoading(false);
       window.addEventListener('resize', () => setDimensions({ width: window.innerWidth, height: window.innerHeight }));
       
     })();
@@ -276,7 +289,7 @@ export const AccountPage = () => {
   }
   return (
     <>
-      <Modal opened={passkeyAuth} onClose={()=> setPasskeyAuth(false)} title="Authenticate your Account" centered>
+      <Modal opened={passkeyAuth} onClose={()=> {}} title="Authenticate your Account" centered withCloseButton={false}>
 
 <div className={classes.formContainer}>
       <div>
@@ -387,7 +400,7 @@ export const AccountPage = () => {
 
   <Modal  overlayProps={{
           backgroundOpacity: 0.55,
-          blur: 7}} size={600} opened={opened && !passkeyAuth} onClose={()=>{}} title="Authenticate your Safe Account" centered>
+          blur: 7}} size={600} opened={opened && !passkeyAuth} onClose={()=>{}} title="Authenticate your Safe Account" centered withCloseButton={false}>
 
   <div className={classes.formContainer} >
       <div>
@@ -430,7 +443,7 @@ export const AccountPage = () => {
            />
    
              <Group wrap="nowrap" gap={10} mt={3}>
-             <CopyButton value={""} timeout={1000}>
+             <CopyButton value={accountDetails.account} timeout={1000}>
                  {({ copied, copy }) => (
                    <Tooltip label={copied ? 'Copied' : 'Copy'} withArrow position="right">
                      <ActionIcon color={copied ? 'teal' : 'gray'} variant="subtle" onClick={copy}>
@@ -676,6 +689,105 @@ export const AccountPage = () => {
   
 </Modal>
 
+<Modal opened={mintModal} onClose={()=>{ setMintModal(false); setSendSuccess(false); setValue(ZeroAddress);}} title="Mint a sample NFT" centered>
+
+<div className={classes.formContainer}>
+      <div>
+        <h1 className={classes.heading}>Mint an NFT on your account</h1>
+      </div>
+      <p className={classes.subHeading}>
+      Mint an NFT gas free.
+      </p>
+      { nftBalance && <div className={classes.inputContainer}>
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'center',
+                  marginTop: '20px',
+                  gap: '20px',
+                  alignItems: 'center',
+                }}
+              >
+          
+             
+              <Indicator inline label={nftBalance.toString()} processing color='green' size={25}>
+              <Image
+                  src={ SafePassKeyNFT }
+                  radius="md"
+                  w={150}
+              />  
+              </Indicator>
+
+              { balanceLoading ? <Skeleton height={15} width={90} mt={6} radius="xl" /> :  <Badge color='green' variant="outline"  radius='lg' size="lg">{`NFT Owned: ${nftBalance}`}</Badge> } 
+
+              </div>  
+          </div> 
+          }
+
+      { !nftBalance && <div className={classes.inputContainer}>
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'center',
+                  marginTop: '20px',
+                  gap: '20px',
+                  alignItems: 'center',
+                }}
+              >
+          
+             
+              <Image
+                  src={ NotFound }
+                  radius="md"
+                  w={150}
+              />  
+
+         <Badge color='red' variant="outline"  radius='lg' size="lg">NO NFT Owned</Badge> 
+
+              </div>  
+          </div> 
+          }
+            
+              <Button
+              size="lg" radius="md" 
+              style={{marginBottom: '20px'}}
+              fullWidth
+              color="green"
+              className={!sendLoader ? classes.btn : ""}
+              onClick={async () => 
+                await MintNFT()}
+              loaderProps={{ color: 'white', type: 'dots', size: 'md' }}
+              disabled= {sendLoader}
+              // loading={sendLoader}
+            >
+              Mint Now
+            </Button>
+
+
+    { sendSuccess && <Notification withBorder radius='md' withCloseButton={false}  icon={<IconCheck style={{ width: rem(20), height: rem(20) }} />} color="teal" title="Mint Successful!" mt="md">
+    Your NFT has safely landed on yout Safe. Buckle up for a stellar degen journey! 🚀💰
+      </Notification>
+      }
+
+    
+    { sendLoader && <Notification withBorder radius='md' loading={sendLoader} withCloseButton={false}  icon={<IconCheck style={{ width: rem(20), height: rem(20) }} />} color="teal" title="Minting your NFT" mt="md">
+       The mint transaction has been sent. Wait for the transacion to get confirmed ⌛️
+      </Notification>
+      }
+
+
+
+    { error && <Notification withBorder radius='md' withCloseButton={false}  icon={<IconX style={{ width: rem(20), height: rem(20) }} />}  color="red" title="Mint Error!" mt="md">
+    Oops! Gremlins have invaded your NFT. Please try again later.
+      </Notification>
+    }
+            
+    </div>
+  
+</Modal>
+
     <Paper className={classes.accountContainer} shadow="md" withBorder radius="md" p="xl" >
       
       <div className={classes.formContainer}>
@@ -708,8 +820,10 @@ export const AccountPage = () => {
                    <Combobox
                         store={chainCombobox}
                         withinPortal={false}
-                        onOptionSubmit={(val) => {
+                        onOptionSubmit={async (val) => {
                           setChainId(Number(val));
+                          const passkeyValidator =  await login(val);
+                          setWalletProvider(passkeyValidator)
                           chainCombobox.closeDropdown();
                         }}
                       >
@@ -750,16 +864,16 @@ export const AccountPage = () => {
 
       
           <div className={classes.actions}>
-            <Button size="lg" radius="md" style={{ width: '110px' }} className={classes.btn} color="teal" onClick={()=> setSendModal(true)}>
-              Send
+            <Button size="lg" radius="md"    
+              leftSection={<IconPhoto size={25} />} className={classes.btn} color="teal" onClick={()=> setMintModal(true)}>
+              Mint
             </Button>
             <Button size="lg" radius="md"
                 color={ "#49494f" }
-                disabled
+                onClick={()=> setSendModal(true)}
                 variant={ "filled" } 
-                style={{
-                  // backgroundColor: "#20283D"
-                }}>Swap</Button>
+                leftSection={<IconTransfer size={25} />}
+                >Send</Button>
           </div>
         </div>
       </div>

@@ -98,7 +98,6 @@ export const sendTransaction = async (chainId: string, recipient: string, amount
       }) || 0
     )
 
-    console.log(walletProvider)
     const validators = await isInstalled(parseInt(chainId), safeAccount, webAuthnModule, 'validator') ? [] : [{ address: walletProvider.address, context: await walletProvider.getEnableData()}]
 
     const smartAccount = await getSmartAccountClient( { chainId, nonceKey: key, address: safeAccount, signUserOperation: walletProvider.signUserOperation, getDummySignature: walletProvider.getDummySignature, validators: validators})

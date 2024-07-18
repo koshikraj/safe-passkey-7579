@@ -1,17 +1,17 @@
-import { Text, ActionIcon, Alert, Anchor, Avatar, Badge, Button, CopyButton, Divider, Input, Modal, Paper, rem, Tooltip, InputBase, Combobox, useCombobox, Group, Notification, Skeleton, Timeline, Stack, Image, Loader, Pill, Indicator } from '@mantine/core';
+import { Text, ActionIcon, Anchor, Avatar, Badge, Button, CopyButton, Divider, Input, Modal, Paper, rem, Tooltip, InputBase, Combobox, useCombobox, Group, Notification, Skeleton, Timeline, Stack, Image, Loader, Pill, Indicator } from '@mantine/core';
 import classes from './account.module.css';
 import { useEffect, useState } from 'react';
 import useLinkStore from '@/store/link/link.store';
-import { ethers, formatEther, parseEther, parseUnits, Wallet, ZeroAddress } from 'ethers';
+import { formatEther, parseEther, parseUnits, ZeroAddress } from 'ethers';
 import { buildMintNFT, buildTransferToken, getTokenBalance, getTokenDecimals } from '@/logic/utils';
 import { useDisclosure } from '@mantine/hooks';
-import { IconCheck, IconChevronDown, IconCoin, IconConfetti, IconCopy, IconPhoto, IconShieldCheck, IconUserCheck, IconX } from '@tabler/icons';
+import { IconCheck, IconChevronDown, IconCoin, IconCopy, IconFingerprint, IconPhoto, IconShieldCheck, IconUserCheck, IconX } from '@tabler/icons';
 import { NetworkUtil } from '@/logic/networks';
 import { getIconForId, getTokenInfo, getTokenList, tokenList } from '@/logic/tokens';
 import { getJsonRpcProvider } from '@/logic/web3';
 
-import { addWebAuthnModule, generateKeysFromString, generateRandomString, getSafePassNFTCount, isInstalled, safePassKeyNFT, sendTransaction } from '@/logic/module';
-import { loadAccountInfo, storeAccountInfo } from '@/utils/storage';
+import { getSafePassNFTCount, isInstalled, safePassKeyNFT, sendTransaction } from '@/logic/module';
+import {  loadPasskey, removePasskey, storeAccountInfo, storePasskey } from '@/utils/storage';
 
 import Passkey from '../../assets/icons/passkey.svg';
 import PasskeyWhite from '../../assets/icons/passkey-white.svg';
@@ -24,9 +24,10 @@ import SafePasskey from '../../assets/icons/safe-passkey.svg';
 
 import { SafeSmartAccountClient, getSmartAccountClient, waitForExecution } from '@/logic/permissionless';
 import { privateKeyToAccount } from 'viem/accounts';
-import { create, login } from '@/logic/passkey';
+import { connectPassKey, connectValidator } from '@/logic/passkey';
 import { IconTransfer } from '@tabler/icons-react';
 import { Hex } from 'viem';
+import { WebAuthnMode } from '@zerodev/passkey-validator';
 
 
 
@@ -38,7 +39,7 @@ export const AccountPage = () => {
   const [ balance, setBalance ] = useState<any>(0);
   const [opened, { open, close }] = useDisclosure(!accountDetails.account);
   const [sendModal, setSendModal] = useState(false);
-  const [passkeyAuth, setPasskeyAuth] = useState(true);
+  const [passkey, setPasskey] = useState<any>(loadPasskey());
   const [mintModal, setMintModal] = useState(false);
   const [tokenValue, setTokenValue] = useState(0);
   const [sendAddress, setSendAddress] = useState('');
@@ -47,14 +48,12 @@ export const AccountPage = () => {
   const [balanceLoading, setBalanceLoading] = useState(false);
   const [nftBalance, setNftBalance] = useState(0);
   const [sendLoader, setSendLoader] = useState(false);
-  // const [safeAccount, setSafeAccount] = useState<Hex>(loadAccountInfo().account);
   const [accountClient, setAccountClient] = useState<SafeSmartAccountClient>();
   const [ authenticating, setAuthenticating ] = useState(false);
   const [ creating, setCreating ] = useState(false);
   const [dimensions, setDimensions] = useState({ width: window.innerWidth, height: window.innerHeight });
   const [value, setValue] = useState<string>("0x0000000000000000000000000000000000000000");
   const [walletProvider, setWalletProvider] = useState<any>();
-  const [passKeyInstalled, setPassKeyInstalled] = useState(false);
 
   
 
@@ -222,39 +221,26 @@ export const AccountPage = () => {
 
 
 
-  function getStep() {
-
-    if( passKeyInstalled ) {
-      return 2;
-    }
-    else if( walletProvider ) {
-      return 1;
-    }
-    else if ( accountDetails.account) {
-      return 0;
-    }
-    else 
-      return -1;
-  }
-
-
 
   useEffect(() => {
     (async () => {
 
 
+      let validator = walletProvider
+      if(!walletProvider && passkey.authenticatorId) {
+        validator = await connectValidator(chainId, passkey)
+        setWalletProvider(validator)
 
-      if (walletProvider) {
+      }
+
+      if (validator) {
         try {
-          const accountClient = await getSmartAccountClient({ chainId, validators: [{ address: walletProvider.address, context: await walletProvider.getEnableData()}]})
+          const accountClient = await getSmartAccountClient({ chainId, validators: [{ address: validator.address, context: await validator.getEnableData()}]})
           const account = accountClient.account.address
-    
-          setNftBalance(await getSafePassNFTCount(chainId, account))
-    
-          setAccountClient(accountClient)
-          // storeAccountInfo(account, address, privateKey);
+  
           setAccountDetails({ account: account, address: '', privateKey: '' })
-
+          setNftBalance(await getSafePassNFTCount(chainId, account))
+          setAccountClient(accountClient)
           setBalanceLoading(true);
           const provider = await getJsonRpcProvider(chainId.toString());
     
@@ -269,7 +255,6 @@ export const AccountPage = () => {
           console.log(e)
 
         }
-        setPassKeyInstalled(true)
       }
   
 
@@ -289,7 +274,7 @@ export const AccountPage = () => {
   }
   return (
     <>
-      <Modal opened={passkeyAuth} onClose={()=> {}} title="Authenticate your Account" centered withCloseButton={false}>
+      <Modal opened={ !passkey.authenticatorId } onClose={()=> {}} title="Authenticate your Account" centered withCloseButton={false}>
 
 <div className={classes.formContainer}>
       <div>
@@ -327,11 +312,12 @@ export const AccountPage = () => {
 
         try {  
         setCreating(true); 
-        const passkeyValidator =  await create(`Safe PassKey ${new Date().toLocaleDateString('en-GB')}`, chainId)
-        setWalletProvider(passkeyValidator)
+        const passkey =  await connectPassKey(`Safe PassKey ${new Date().toLocaleDateString('en-GB')}`, WebAuthnMode.Register)
+        storePasskey(passkey)
+        setWalletProvider(await connectValidator(chainId, passkey))
+        setPasskey(passkey);
         storeAccountInfo("", "", "");
         setAccountDetails({});
-        setPasskeyAuth(false);
         setCreating(false); 
       }
       catch(e) {
@@ -375,10 +361,13 @@ export const AccountPage = () => {
         setAuthenticating(true); 
           
         try {  
-        const passkeyValidator =  await login(chainId)
+        const passkey =  await connectPassKey('SafePassKey', WebAuthnMode.Login)
+        console.log(passkey)
 
-        setWalletProvider(passkeyValidator)
-        setPasskeyAuth(false);
+        storePasskey(passkey)
+        setWalletProvider(await connectValidator(chainId, passkey))
+
+        setPasskey(passkey);
         setAuthenticating(false); 
 
         } 
@@ -400,7 +389,7 @@ export const AccountPage = () => {
 
   <Modal  overlayProps={{
           backgroundOpacity: 0.55,
-          blur: 7}} size={600} opened={opened && !passkeyAuth} onClose={()=>{}} title="Authenticate your Safe Account" centered withCloseButton={false}>
+          blur: 7}} size={600} opened={opened && passkey.authenticatorId} onClose={()=>{}} title="Authenticate your Safe Account" centered withCloseButton={false}>
 
   <div className={classes.formContainer} >
       <div>
@@ -410,7 +399,7 @@ export const AccountPage = () => {
 
       <div className={classes.accountInputContainer}>
       {<Timeline
-      active={getStep()} 
+      active={2} 
       bulletSize={30} 
       lineWidth={1}
       color='green'
@@ -421,7 +410,7 @@ export const AccountPage = () => {
         title="Your Safe Account"
       >
 
-          { accountDetails.account && 
+
 
 
             <Group
@@ -442,6 +431,8 @@ export const AccountPage = () => {
              radius="md"
            />
    
+            { accountDetails.account ?
+            
              <Group wrap="nowrap" gap={10} mt={3}>
              <CopyButton value={accountDetails.account} timeout={1000}>
                  {({ copied, copy }) => (
@@ -456,21 +447,44 @@ export const AccountPage = () => {
                    </Tooltip>
                  )}
                </CopyButton>
-               <Text fz="lg" c="dimmed">
+               <Text fz="sm" c="dimmed">
                {shortenAddress( accountDetails.account ? accountDetails.account : ZeroAddress)}
                </Text>
-             </Group>
-         </Group>
-         </Group>
+               <Button
+        size="sm" 
+        radius="md"
+        color='red'
+        variant='light'         
+        fullWidth
+        loaderProps={{ color: 'white', type: 'dots', size: 'md' }}
+        onClick={ async() => { 
+        
+        try {  
+        removePasskey()
+        setPasskey({})
+        } 
+        catch(e) {
+          console.log(e)
+        }
+   
+        }}
+      >
+      Logout
+      </Button>
+        </Group> : 
+             <Skeleton height={18} width={180} mt={6} radius="xl" />
           }
+         </Group>
+         </Group>
+          
     </Timeline.Item>
       <Timeline.Item
-        bullet={<IconUserCheck style={{ width: rem(18), height: rem(18) }} />}
-        title="Enable PassKey auth on Safe"
+        bullet={<IconFingerprint style={{ width: rem(18), height: rem(18) }} />}
+        title="PassKey for your Safe"
       
       >
 
-      {getStep() > 1 && <Stack
+      {accountDetails.account && <Stack
           style={{
             display: 'flex',
             marginTop: '20px',
@@ -493,7 +507,7 @@ export const AccountPage = () => {
       </Stack> 
       }
 
-      { getStep() == 1 && <Stack
+      { !accountDetails.account && <Stack
           style={{
             display: 'flex',
             marginTop: '20px',
@@ -511,20 +525,6 @@ export const AccountPage = () => {
 
       </Stack> 
       }
-
-
-    { getStep() < 1 && <Stack>
-      <Text fz="sm" fw={500} className={classes.name}  c="dimmed">
-        Authenticate with any of the below methods
-        </Text>
-        <Group>
-      <Button size='lg' variant="default" radius='md' onClick={ ()=> setPasskeyAuth(true)}>
-      <Avatar src={Passkey} size='md'  />
-      Add PassKey
-      </Button>
-      </Group>
-      </Stack> 
-    }
 
 
       </Timeline.Item>
@@ -547,8 +547,8 @@ export const AccountPage = () => {
         size="lg" 
         radius="md"         
         fullWidth
-        className={getStep() < 2 ?  "" : classes.btn}
-        disabled={getStep() < 2}
+        className={!accountDetails.account ?  "" : classes.btn}
+        disabled={ !accountDetails.account}  
         loaderProps={{ color: 'white', type: 'dots', size: 'md' }}
         onClick={ async() => { 
           
@@ -563,9 +563,12 @@ export const AccountPage = () => {
       >
       Continue
       </Button>
+      
 
 
       </div>   
+
+      
       </div>
     </div>
   
@@ -822,9 +825,9 @@ export const AccountPage = () => {
                         withinPortal={false}
                         onOptionSubmit={async (val) => {
                           setChainId(Number(val));
-                          const passkeyValidator =  await login(val);
-                          setWalletProvider(passkeyValidator)
                           chainCombobox.closeDropdown();
+                          setWalletProvider(await connectValidator(val, passkey))
+                          
                         }}
                       >
                         <Combobox.Target>
